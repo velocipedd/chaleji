@@ -1,4 +1,4 @@
-```javascript
+javascript
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const cors = require('cors');
@@ -156,4 +156,3 @@ process.on('SIGINT', () => {
     process.exit(0);
   });
 });
-```
