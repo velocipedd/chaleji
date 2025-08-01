@@ -1,0 +1,505 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chaleji - Travel & Hospitality</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babel-standalone@6/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- ESM loader for Node.js modules in browser -->
+  <script src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    // Backend: Simulate Express and SQLite in-memory
+    import express from 'https://cdn.skypack.dev/express';
+    import sqlite3 from 'https://cdn.skypack.dev/sqlite3';
+    import cors from 'https://cdn.skypack.dev/cors';
+
+    // SQLite in-memory database
+    const db = new sqlite3.Database(':memory:', (err) => {
+      if (err) console.error('SQLite connection error:', err.message);
+      else {
+        console.log('Connected to in-memory SQLite database');
+        // Create tables
+        db.run(`
+          CREATE TABLE sections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+            updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        db.run(`
+          CREATE TABLE destinations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            image TEXT,
+            createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+            updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+          )
+        `);
+        db.run(`
+          CREATE TABLE bookings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL,
+            destinationId INTEGER NOT NULL,
+            createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (destinationId) REFERENCES destinations(id)
+          )
+        `);
+        // Seed initial data
+        const initialSections = [
+          { type: 'hero', content: JSON.stringify({ title: 'Move, Breathe, Discover', subtitle: 'Hotels and adventures, designed together.' }) },
+        ];
+        const initialDestinations = [
+          { name: 'Manali', description: 'Snowy peaks, cozy cafes, and thrilling adventures.', image: 'https://source.unsplash.com/random/400x300?manali' },
+          { name: 'Leh-Ladakh', description: 'Himalayan vistas and epic bike journeys.', image: 'https://source.unsplash.com/random/400x300?ladakh' },
+          { name: 'Kasol', description: 'Riverside hostels with vibrant backpacker vibes.', image: 'https://source.unsplash.com/random/400x300?kasol' },
+          { name: 'Spiti Valley', description: 'Rugged landscapes and ancient monasteries.', image: 'https://source.unsplash.com/random/400x300?spiti' },
+        ];
+        initialSections.forEach(section => {
+          db.run('INSERT INTO sections (type, content) VALUES (?, ?)', [section.type, section.content]);
+        });
+        initialDestinations.forEach(dest => {
+          db.run('INSERT INTO destinations (name, description, image) VALUES (?, ?, ?)', [dest.name, dest.description, dest.image]);
+        });
+      }
+    });
+
+    // Express app simulation
+    const app = express();
+    app.use(cors({ origin: '*', methods: ['GET', 'POST'], allowedHeaders: ['Content-Type'] }));
+    app.use(express.json());
+
+    // API Routes
+    app.get('/api/sections', (req, res) => {
+      db.all('SELECT * FROM sections', [], (err, sections) => {
+        if (err) return res.status(500).json({ error: 'Server error', message: err.message });
+        db.all('SELECT * FROM destinations', [], (err, destinations) => {
+          if (err) return res.status(500).json({ error: 'Server error', message: err.message });
+          const destinationSection = {
+            type: 'destinations',
+            content: destinations.map(dest => ({ ...dest, image: dest.image || null })),
+          };
+          res.json([
+            ...sections.map(section => ({ ...section, content: JSON.parse(section.content) })),
+            destinationSection,
+          ]);
+        });
+      });
+    });
+
+    app.post('/api/sections', (req, res) => {
+      const { type, content } = req.body;
+      if (!type || !content) return res.status(400).json({ error: 'Type and content are required' });
+      db.run('INSERT INTO sections (type, content) VALUES (?, ?)', [type, JSON.stringify(content)], function (err) {
+        if (err) return res.status(500).json({ error: 'Server error', message: err.message });
+        res.status(201).json({ id: this.lastID, type, content });
+      });
+    });
+
+    app.post('/api/destinations', (req, res) => {
+      const { name, description, image } = req.body;
+      if (!name || !description) return res.status(400).json({ error: 'Name and description are required' });
+      db.run('INSERT INTO destinations (name, description, image) VALUES (?, ?, ?)', [name, description, image || null], function (err) {
+        if (err) return res.status(500).json({ error: 'Server error', message: err.message });
+        res.status(201).json({ id: this.lastID, name, description, image });
+      });
+    });
+
+    app.post('/api/bookings', (req, res) => {
+      const { email, destinationId } = req.body;
+      if (!email || !destinationId) return res.status(400).json({ error: 'Email and destinationId are required' });
+      db.run('INSERT INTO bookings (email, destinationId) VALUES (?, ?)', [email, destinationId], function (err) {
+        if (err) return res.status(500).json({ error: 'Server error', message: err.message });
+        res.status(201).json({ id: this.lastID, email, destinationId, createdAt: new Date().toISOString() });
+      });
+    });
+
+    // Note: In a browser, Express can't listen on a port. For testing, use a separate server.js in Codespaces.
+  </script>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // Determine API base URL dynamically
+    const getApiBaseUrl = () => {
+      if (window.location.hostname.includes('githubpreview.dev')) {
+        return `${window.location.protocol}//${window.location.hostname.replace(/-\d+/, '-5000')}/api`;
+      }
+      return 'http://localhost:5000/api';
+    };
+    const API_BASE_URL = getApiBaseUrl();
+
+    // Retry fetch with delay
+    const fetchWithRetry = async (url, options, retries = 3, delay = 1000) => {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const response = await fetch(url, options);
+          if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+          return await response.json();
+        } catch (error) {
+          if (i < retries - 1) {
+            await new Promise(resolve => setTimeout(resolve, delay));
+            continue;
+          }
+          throw error;
+        }
+      }
+    };
+
+    // Navigation Component
+    const Navbar = () => (
+      <nav className="bg-gray-900 text-white p-4 shadow-lg">
+        <div className="container mx-auto flex justify-between items-center">
+          <a href="/" className="text-3xl font-bold tracking-tight">Chaleji</a>
+          <ul className="flex space-x-6">
+            <li><a href="/" className="hover:text-teal-400 transition">Home</a></li>
+            <li><a href="#about" className="hover:text-teal-400 transition">About Us</a></li>
+            <li><a href="#destinations" className="hover:text-teal-400 transition">Destinations</a></li>
+            <li><a href="#login" className="hover:text-teal-400 transition">Login</a></li>
+          </ul>
+        </div>
+      </nav>
+    );
+
+    // Hero Section Component
+    const Hero = ({ content }) => (
+      <section className="bg-cover bg-center h-96 flex items-center justify-center" style={{ backgroundImage: 'url(https://source.unsplash.com/random/1920x1080?mountains)' }}>
+        <div className="text-center text-white bg-black bg-opacity-50 p-8 rounded-lg">
+          <h1 className="text-4xl md:text-5xl font-bold mb-4">{content.title || 'Move, Breathe, Discover'}</h1>
+          <p className="text-xl md:text-2xl">{content.subtitle || 'Hotels and adventures, designed together.'}</p>
+        </div>
+      </section>
+    );
+
+    // Destinations Component
+    const Destinations = ({ destinations, setCurrentPage, setBookingDestination }) => (
+      <section className="py-12 bg-gray-100">
+        <div className="container mx-auto">
+          <h2 className="text-3xl font-bold text-center mb-8 text-gray-800">Explore Top Destinations</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {destinations.map((dest, index) => (
+              <div key={index} className="bg-white shadow-lg rounded-lg overflow-hidden transform hover:scale-105 transition">
+                <img src={dest.image || 'https://source.unsplash.com/random/400x300?' + dest.name} alt={dest.name} className="w-full h-48 object-cover" />
+                <div className="p-4">
+                  <h3 className="text-xl font-semibold text-gray-800">{dest.name}</h3>
+                  <p className="text-gray-600">{dest.description}</p>
+                  <button
+                    onClick={() => {
+                      setBookingDestination(dest);
+                      setCurrentPage('booking');
+                    }}
+                    className="mt-4 bg-teal-500 text-white p-2 rounded hover:bg-teal-600 transition"
+                  >
+                    Book Now
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+
+    // Booking Page Component
+    const BookingPage = ({ destination, setCurrentPage, setBookingConfirmation }) => {
+      const [email, setEmail] = useState('');
+      const [showEmailPrompt, setShowEmailPrompt] = useState(false);
+      const [error, setError] = useState(null);
+
+      const handleConfirmBooking = async () => {
+        if (!email) {
+          setShowEmailPrompt(true);
+          return;
+        }
+        try {
+          const response = await fetch(`${API_BASE_URL}/bookings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, destinationId: destination.id }),
+          });
+          if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+          const booking = await response.json();
+          setBookingConfirmation({ ...booking, destinationName: destination.name });
+          setCurrentPage('confirmation');
+          setEmail('');
+          setShowEmailPrompt(false);
+        } catch (error) {
+          console.error('Error creating booking:', error.message);
+          setError(`Failed to create booking: ${error.message}`);
+        }
+      };
+
+      return (
+        <section className="py-12 bg-gray-100 min-h-screen">
+          <div className="container mx-auto p-6 bg-white shadow-lg rounded-lg">
+            <h2 className="text-3xl font-bold mb-6 text-gray-800">Book Your Adventure</h2>
+            <div className="mb-6">
+              <h3 className="text-xl font-semibold mb-2">Booking for: {destination.name}</h3>
+              <p className="text-gray-600">{destination.description}</p>
+              <img src={destination.image || 'https://source.unsplash.com/random/400x300?' + destination.name} alt={destination.name} className="w-full max-w-md h-48 object-cover rounded-lg mt-4" />
+            </div>
+            {showEmailPrompt && (
+              <div className="mb-6">
+                <label className="block text-gray-700 mb-2">Please enter your email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Your email"
+                  className="border p-2 rounded w-full focus:outline-none focus:ring-2 focus:ring-teal-400"
+                />
+              </div>
+            )}
+            {error && (
+              <div className="text-red-600 bg-red-100 border border-red-400 rounded p-4 mb-6">
+                {error}
+              </div>
+            )}
+            <div className="flex space-x-4">
+              <button
+                onClick={handleConfirmBooking}
+                className="bg-teal-500 text-white p-2 rounded hover:bg-teal-600 transition"
+              >
+                Confirm Booking
+              </button>
+              <button
+                onClick={() => setCurrentPage('home')}
+                className="bg-gray-500 text-white p-2 rounded hover:bg-gray-600 transition"
+              >
+                Back to Home
+              </button>
+            </div>
+          </div>
+        </section>
+      );
+    };
+
+    // Booking Confirmation Page Component
+    const BookingConfirmationPage = ({ confirmation }) => (
+      <section className="py-12 bg-gray-100 min-h-screen">
+        <div className="container mx-auto p-6 bg-white shadow-lg rounded-lg">
+          <h2 className="text-3xl font-bold mb-6 text-gray-800">Booking Confirmed!</h2>
+          <div className="mb-6 text-center">
+            <h3 className="text-2xl font-semibold text-teal-600">Thank You for Your Booking!</h3>
+            <p className="text-gray-700 mt-2">We’ve sent a confirmation to: <span className="font-semibold">{confirmation.email}</span></p>
+            <div className="mt-4 p-4 bg-teal-50 rounded-lg">
+              <h4 className="text-xl font-semibold mb-2">Booking Details</h4>
+              <p><strong>Booking ID:</strong> {confirmation.id}</p>
+              <p><strong>Destination:</strong> {confirmation.destinationName}</p>
+              <p><strong>Booked On:</strong> {new Date(confirmation.createdAt).toLocaleString()}</p>
+            </div>
+          </div>
+          <div className="mb-6">
+            <h4 className="text-xl font-semibold mb-2">What’s Next?</h4>
+            <p className="text-gray-600">Your adventure to {confirmation.destinationName} is confirmed! Here are some tips to prepare:</p>
+            <ul className="list-disc list-inside text-gray-600 mt-2">
+              <li>Pack for the weather: Check the forecast for {confirmation.destinationName}.</li>
+              <li>Explore local attractions: Don’t miss the hidden gems!</li>
+              <li>Contact us: Reach out for any questions at support@chaleji.com.</li>
+            </ul>
+          </div>
+          <div className="mb-6">
+            <h4 className="text-xl font-semibold mb-2">Why Travel with Chaleji?</h4>
+            <p className="text-gray-600">We combine cozy accommodations with thrilling adventures, tailored to your wanderlust. Enjoy seamless booking and personalized support.</p>
+          </div>
+          <div className="flex justify-center">
+            <a href="/" className="bg-teal-500 text-white p-2 rounded hover:bg-teal-600 transition">
+              Back to Home
+            </a>
+          </div>
+        </div>
+      </section>
+    );
+
+    // Dashboard Component
+    const Dashboard = ({ sections, setSections }) => {
+      const [newSection, setNewSection] = useState({ type: 'hero', content: { title: '', subtitle: '' } });
+      const [newDestination, setNewDestination] = useState({ name: '', description: '', image: '' });
+
+      const addSection = async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/sections`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newSection),
+          });
+          if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+          const savedSection = await response.json();
+          setSections([...sections, savedSection]);
+          setNewSection({ type: 'hero', content: { title: '', subtitle: '' } });
+        } catch (error) {
+          console.error('Error adding section:', error.message);
+          alert(`Failed to add section: ${error.message}`);
+        }
+      };
+
+      const addDestination = async () => {
+        try {
+          const response = await fetch(`${API_BASE_URL}/destinations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newDestination),
+          });
+          if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+          const savedDestination = await response.json();
+          setSections(sections.map(s => s.type === 'destinations' ? { ...s, content: [...s.content, savedDestination] } : s));
+          setNewDestination({ name: '', description: '', image: '' });
+        } catch (error) {
+          console.error('Error adding destination:', error.message);
+          alert(`Failed to add destination: ${error.message}`);
+        }
+      };
+
+      return (
+        <div className="container mx-auto p-6 bg-white shadow-lg rounded-lg">
+          <h2 className="text-2xl font-bold mb-6 text-gray-800">Admin Dashboard</h2>
+          <div className="mb-8">
+            <h3 className="text-xl font-semibold mb-3">Add New Section</h3>
+            <div className="flex flex-col md:flex-row gap-4">
+              <select
+                className="border p-2 rounded focus:outline-none focus:ring-2 focus:ring-teal-400"
+                value={newSection.type}
+                onChange={(e) => setNewSection({ ...newSection, type: e.target.value })}
+              >
+                <option value="hero">Hero</option>
+                <option value="destinations">Destinations</option>
+              </select>
+              <input
+                type="text"
+                placeholder="Title"
+                className="border p-2 rounded flex-1 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                value={newSection.content.title}
+                onChange={(e) => setNewSection({ ...newSection, content: { ...newSection.content, title: e.target.value } })}
+              />
+              <input
+                type="text"
+                placeholder="Subtitle"
+                className="border p-2 rounded flex-1 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                value={newSection.content.subtitle}
+                onChange={(e) => setNewSection({ ...newSection, content: { ...newSection.content, subtitle: e.target.value } })}
+              />
+              <button onClick={addSection} className="bg-teal-500 text-white p-2 rounded hover:bg-teal-600 transition">Add Section</button>
+            </div>
+          </div>
+          <div>
+            <h3 className="text-xl font-semibold mb-3">Add New Destination</h3>
+            <div className="flex flex-col md:flex-row gap-4">
+              <input
+                type="text"
+                placeholder="Name"
+                className="border p-2 rounded flex-1 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                value={newDestination.name}
+                onChange={(e) => setNewDestination({ ...newDestination, name: e.target.value })}
+              />
+              <input
+                type="text"
+                placeholder="Description"
+                className="border p-2 rounded flex-1 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                value={newDestination.description}
+                onChange={(e) => setNewDestination({ ...newDestination, description: e.target.value })}
+              />
+              <input
+                type="text"
+                placeholder="Image URL"
+                className="border p-2 rounded flex-1 focus:outline-none focus:ring-2 focus:ring-teal-400"
+                value={newDestination.image}
+                onChange={(e) => setNewDestination({ ...newDestination, image: e.target.value })}
+              />
+              <button onClick={addDestination} className="bg-teal-500 text-white p-2 rounded hover:bg-teal-600 transition">Add Destination</button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    // Main App Component
+    const App = () => {
+      const [sections, setSections] = useState([]);
+      const [isAdmin, setIsAdmin] = useState(false);
+      const [error, setError] = useState(null);
+      const [currentPage, setCurrentPage] = useState('home');
+      const [bookingDestination, setBookingDestination] = useState(null);
+      const [bookingConfirmation, setBookingConfirmation] = useState(null);
+
+      useEffect(() => {
+        if (currentPage === 'home') {
+          fetchWithRetry(`${API_BASE_URL}/sections`, {}, 3, 1000)
+            .then(data => {
+              setSections(data);
+              setError(null);
+            })
+            .catch(err => {
+              console.error('Fetch error:', err.message);
+              setError(`Failed to load data: ${err.message}. Check if the backend is running and the database is accessible.`);
+            });
+        }
+      }, [currentPage]);
+
+      return (
+        <div>
+          <Navbar />
+          {currentPage === 'home' && (
+            <>
+              <button
+                onClick={() => setIsAdmin(!isAdmin)}
+                className="fixed top-4 right-4 bg-teal-500 text-white p-2 rounded hover:bg-teal-600 transition z-10"
+              >
+                {isAdmin ? 'View Site' : 'Admin Dashboard'}
+              </button>
+              {error && (
+                <div className="container mx-auto p-4 text-red-600 bg-red-100 border border-red-400 rounded">
+                  {error}
+                </div>
+              )}
+              {isAdmin ? (
+                <Dashboard sections={sections} setSections={setSections} />
+              ) : (
+                sections.map((section, index) => {
+                  if (section.type === 'hero') {
+                    return <Hero key={index} content={section.content} />;
+                  } else if (section.type === 'destinations') {
+                    return (
+                      <Destinations
+                        key={index}
+                        destinations={section.content}
+                        setCurrentPage={setCurrentPage}
+                        setBookingDestination={setBookingDestination}
+                      />
+                    );
+                  }
+                  return null;
+                })
+              )}
+            </>
+          )}
+          {currentPage === 'booking' && bookingDestination && (
+            <BookingPage
+              destination={bookingDestination}
+              setCurrentPage={setCurrentPage}
+              setBookingConfirmation={setBookingConfirmation}
+            />
+          )}
+          {currentPage === 'confirmation' && bookingConfirmation && (
+            <BookingConfirmationPage confirmation={bookingConfirmation} />
+          )}
+          <footer className="bg-gray-900 text-white text-center p-6">
+            <p>Chaleji.com © 2025 | All Rights Reserved</p>
+            <p>Made with ❤️ in Manali</p>
+          </footer>
+        </div>
+      );
+    };
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
+```
